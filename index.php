@@ -1,11 +1,9 @@
 <?php
 echo "<pre>";
-print_r($_POST);
 print_r($_FILES);
 echo "</pre>";
-
 #cria estrutura do banco de dados através do arquivo de syntax .sps
-if (isset($_FILES['arquivoSPS'])) {
+if (isset($_FILES['arquivoSPS']) and ($_FILES['arquivoSPS']['size']>0 )) {
 
 	$uploadDir = "upload/";
 	$spsFileName = $uploadDir . $_FILES['arquivoSPS']['name'];
@@ -17,47 +15,21 @@ if (isset($_FILES['arquivoSPS'])) {
 		echo "Não foi possível gravar arquivo";
 		echo "<br><br>";
 	}
-	$bloco=array('ini'=>'/VARIABLES=','end'=>'CACHE.');
-	$spss_tipos=array(" F"," DATETIME"," A");
-	$spss_tipos_new=array(" F|"," DATETIME|"," A|");
-	
-	$arrSQL = array();
-	if (($handle = fopen($spsFileName, "r")) !== false) {
-		$i=0;
-	    $inicia = false;
-		while (($data = fgets($handle, 1000)) !== false) {
-			echo $i++;
-			#identifica inicio do bloco de variaveis
-			#echo "data:{$data}={$bloco['ini']}<br>";
-			if(trim($data)==$bloco['ini']){
-				$inicia=true;
-			}
-			#identifica fim do bloco de variaveis
-			if(trim($data)==$bloco['end']){
-				$inicia=false;
-				echo "<pre>";
-				print_r($arrSQL);
-				echo "</pre>";				
-				exit();
-			}
-			#armazenas as informacoes dos campos no array
-			if($inicia){
-				$data2 = str_replace($spss_tipos,$spss_tipos_new,trim($data));
-				$detalhe = explode("|",implode("|",explode(" ",$data2)));
-				$arrSQL[] = array("campo"=>$detalhe[0],"tipo"=>$detalhe[1],"tamanho"=>$detalhe[2]);
-			}
-
-			
-		}//fim while
-		
-		fclose($handle);
-	}//fim if
+	$arrSQLCriaTab=variaveisMetadados($spsFileName,'/VARIABLES=','CACHE.');
+	$arrCamposTradutor= variaveisEstruturaBD($spsFileName,'VARIABLE LEVEL V527(SCALE).','RESTORE LOCALE.');
+	$queryCriaTabela=geraTabelaQuery($arrSQLCriaTab,$arrCamposTradutor);
+	echo "<pre>{$queryCriaTabela}</pre>";
+	$conn=conecta();
+	$conn->exec($queryCriaTabela);
+	echo "<pre>";
+	print_r();
+	echo "<pre>";
 
 }
 
 
 #lê arquivo CSV e insere no bd
-if (isset($_FILES['arquivoCSV'])) {
+if (isset($_FILES['arquivoCSV']) and ($_FILES['arquivoCSV']['size']>0 )) {
 
 	$uploadDir = "upload/";
 	$csvFileName = $uploadDir . $_FILES['arquivoCSV']['name'];
@@ -69,23 +41,127 @@ if (isset($_FILES['arquivoCSV'])) {
 		echo "Não foi possível gravar arquivo";
 		echo "<br><br>";
 	}
+	
+	$sqlInsert  =" LOAD DATA INFILE 'data.txt' INTO TABLE tbl_name";
+    $sqlInsert .=" FIELDS TERMINATED BY ',' ENCLOSED BY "'" ";
+    $sqlInsert .=" LINES TERMINATED BY '\r\n' ";
+    $sqlInsert .=" IGNORE 1 LINES; ";
+	
 
-	if (($handle = fopen($csvFileName, "r")) !== false) {
-		$i=0;
+}
 
-		while (($data = fgetcsv($handle, 10000, ",",'"')) !== false) {
 
-			$num = count($data);
-				for ($c = 0; $c < $num; $c++) {
-					echo $data[$c]." ";
+
+function variaveisMetadados($spsFileName,$posInicial,$posFinal){
+	$spss_tipos=array(" F"," DATETIME"," A");
+	$spss_tipos_new=array(" F|"," DATETIME|"," A|");
+	$arrSQLCriaTab = array();
+	if (($handle = fopen($spsFileName, "r")) !== false) {
+	    $inicia = false;
+		while (($data = fgets($handle, 1000)) !== false) {
+			#identifica inicio do bloco de variaveis
+			if(trim($data)==$posInicial){
+				$inicia=true;
+			}
+			#identifica fim do bloco de variaveis
+			if(trim($data)==$posFinal){
+				$inicia=false;
+				return $arrSQLCriaTab;
+				exit();
+			}
+			#armazenas as informacoes dos campos no array
+			if($inicia){
+				$data2 = str_replace($spss_tipos,$spss_tipos_new,trim($data));
+				$detalhe = explode("|",implode("|",explode(" ",$data2)));
+				if(count($detalhe)==3){
+					$arrSQLCriaTab[] = array("campo"=>$detalhe[0],"tipo"=>$detalhe[1],"tamanho"=>str_replace(".","",$detalhe[2]));
 				}
-				echo "<br />\n";
+			}			
+		}//fim while				
+		fclose($handle);
+	}//fim if	
+}
+
+function variaveisEstruturaBD($spsFileName,$posInicial,$posFinal){
+	$arrCamposTradutor=array();
+    $spss_de=array(" ","RENAMEVARIABLE","(",")",".");
+	$spss_para=array("","","","","");	
+	if (($handle = fopen($spsFileName, "r")) !== false) {
+	    $inicia = false;
+		while (($data = fgets($handle, 1000)) !== false) {
+			#identifica inicio do bloco de variaveis
+			if(trim($data)==$posInicial){
+				$inicia=true;
+			}
+			#identifica fim do bloco de variaveis
+			if(trim($data)==$posFinal){
+				$inicia=false;
+				return $arrCamposTradutor;
+				exit();
+			}
+			#armazenas as informacoes dos campos no array
+			if($inicia){
+				$data2 = str_replace($spss_de,$spss_para,trim($data));
+				$campos = explode("=",$data2);
+				if(count($campos)==2){
+					$arrCamposTradutor[$campos[0]] = $campos[1];
+				}
+			}			
+		}//fim while				
+		fclose($handle);
+	}//fim if		
+}
+
+
+function geraTabelaQuery($arrTextoSPS,$arrCamposTradutor){
+	$head = "CREATE TABLE IF NOT EXISTS `relatorios_resbr` ( \n";
+	$foot = ") \n COMMENT='Questionário RESBR' \nCOLLATE='latin1_swedish_ci' \nENGINE=MYISAM;";
+	$arrCampos = array();
+	foreach ($arrTextoSPS as $indice => $estrutura){
+		if (substr($estrutura['campo'],0,1)=='V'){
+			#echo $estrutura['tipo'];
+			$campo = $arrCamposTradutor[$estrutura['campo']];
+			switch(trim($estrutura['tipo'])){
+				case 'F':
+					$arrCampos[]="\n`{$campo}` DOUBLE NULL";
+				break;
+				case 'A':
+					$arrCampos[]="\n`{$campo}` VARCHAR({$estrutura['tamanho']}) NULL";								
+				break;
+				case 'DATETIME':
+					$arrCampos[]="\n `{$campo}` DATETIME NULL";
+				break;
+				default:
+				echo "campo não considerado: {$campo}<br>";
 				
 			}
-		
-			fclose($handle);
-	}
 
+		}
+	}
+	if (!empty($arrCampos)){
+		$sintaxeSQL = $head.implode(',',$arrCampos).$foot;
+	}else{
+		$sintaxeSQL = "error";
+	}
+	return $sintaxeSQL;		
+}
+
+function conecta(){
+	$servername = "localhost";
+	$username = "root";
+	$password = "";
+    $dbname="tabquest";
+	try {
+		$conn = new PDO("mysql:host=$servername;dbname=$dbname", $username, $password);
+		// set the PDO error mode to exception
+		$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+		echo "Connected successfully"; 
+		}
+	catch(PDOException $e)
+		{
+		echo "Connection failed: " . $e->getMessage();
+		}	
+	return $conn;	
 }
 ?>
 <!DOCTYPE html>
