@@ -2,6 +2,7 @@
 echo "<pre>";
 print_r($_FILES);
 echo "</pre>";
+$nomeTabelaRelatorio ="relatorios_resbr";
 #cria estrutura do banco de dados através do arquivo de syntax .sps
 if (isset($_FILES['arquivoSPS']) and ($_FILES['arquivoSPS']['size']>0 )) {
 
@@ -17,13 +18,10 @@ if (isset($_FILES['arquivoSPS']) and ($_FILES['arquivoSPS']['size']>0 )) {
 	}
 	$arrSQLCriaTab=variaveisMetadados($spsFileName,'/VARIABLES=','CACHE.');
 	$arrCamposTradutor= variaveisEstruturaBD($spsFileName,'VARIABLE LEVEL V527(SCALE).','RESTORE LOCALE.');
-	$queryCriaTabela=geraTabelaQuery($arrSQLCriaTab,$arrCamposTradutor);
+	$queryCriaTabela=geraTabelaQuery($arrSQLCriaTab,$arrCamposTradutor,$nomeTabelaRelatorio);
 	echo "<pre>{$queryCriaTabela}</pre>";
 	$conn=conecta();
 	$conn->exec($queryCriaTabela);
-	echo "<pre>";
-	print_r();
-	echo "<pre>";
 
 }
 
@@ -41,12 +39,14 @@ if (isset($_FILES['arquivoCSV']) and ($_FILES['arquivoCSV']['size']>0 )) {
 		echo "Não foi possível gravar arquivo";
 		echo "<br><br>";
 	}
-	
-	$sqlInsert  =" LOAD DATA INFILE 'data.txt' INTO TABLE tbl_name";
-    $sqlInsert .=" FIELDS TERMINATED BY ',' ENCLOSED BY "'" ";
-    $sqlInsert .=" LINES TERMINATED BY '\r\n' ";
+	$rota = dirname(__FILE__);
+$sqlInsert  =" LOAD DATA LOW_PRIORITY LOCAL INFILE '{$rota}\{$csvFileName}' INTO TABLE `{$nomeTabelaRelatorio}`";
+	$sqlInsert .=" FIELDS TERMINATED BY ',' ESCAPED BY '\"' ";
+	$sqlInsert .=" LINES TERMINATED BY '\r\n'";
     $sqlInsert .=" IGNORE 1 LINES; ";
-	
+	echo $sqlInsert;
+	$conn=conecta();
+	$conn->exec($sqlInsert);
 
 }
 
@@ -113,8 +113,8 @@ function variaveisEstruturaBD($spsFileName,$posInicial,$posFinal){
 }
 
 
-function geraTabelaQuery($arrTextoSPS,$arrCamposTradutor){
-	$head = "CREATE TABLE IF NOT EXISTS `relatorios_resbr` ( \n";
+function geraTabelaQuery($arrTextoSPS,$arrCamposTradutor,$nomeTabelaRelatorio){
+$head = "CREATE TABLE IF NOT EXISTS `{$nomeTabelaRelatorio}` ( \n";
 	$foot = ") \n COMMENT='Questionário RESBR' \nCOLLATE='latin1_swedish_ci' \nENGINE=MYISAM;";
 	$arrCampos = array();
 	foreach ($arrTextoSPS as $indice => $estrutura){
